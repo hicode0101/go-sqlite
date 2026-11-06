@@ -1,0 +1,1262 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>go-sqlite: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/hicode0101/go-sqlite/ddlmod.go (98.5%)</option>
+				
+				<option value="file1">github.com/hicode0101/go-sqlite/migrator.go (91.4%)</option>
+				
+				<option value="file2">github.com/hicode0101/go-sqlite/sqlite.go (97.5%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package sqlite
+
+import (
+        "database/sql"
+        "errors"
+        "fmt"
+        "regexp"
+        "strconv"
+        "strings"
+
+        "gorm.io/gorm/migrator"
+)
+
+// sqliteSeparator lists the characters that can quote or delimit tokens in a
+// CREATE TABLE body: backticks, double quotes, single quotes and tabs.
+const sqliteSeparator = "`|\"|'|\t"
+
+var (
+        // uniqueRegexp captures the column list of "CONSTRAINT &lt;name&gt; UNIQUE (...)".
+        uniqueRegexp = regexp.MustCompile(fmt.Sprintf(`^CONSTRAINT [%v]?[\w-]+[%v]? UNIQUE (.*)$`, sqliteSeparator, sqliteSeparator))
+        // indexRegexp captures the "ON &lt;table&gt; (...)" tail of CREATE [UNIQUE] INDEX statements.
+        indexRegexp = regexp.MustCompile(fmt.Sprintf(`(?is)CREATE(?: UNIQUE)? INDEX [%v]?[\w\d-]+[%v]?(?s:.*?)ON (.*)$`, sqliteSeparator, sqliteSeparator))
+        // tableRegexp splits a CREATE TABLE statement into its head
+        // ("CREATE TABLE &lt;name&gt;") and body (the parenthesized column list).
+        tableRegexp = regexp.MustCompile(fmt.Sprintf(`(?is)(CREATE TABLE [%v]?[\w\d-]+[%v]?)(?:\s*\((.*)\))?`, sqliteSeparator, sqliteSeparator))
+        // separatorRegexp matches any single separator character.
+        separatorRegexp = regexp.MustCompile(fmt.Sprintf("[%v]", sqliteSeparator))
+        // columnsRegexp extracts column names following '(' or ','.
+        columnsRegexp = regexp.MustCompile(fmt.Sprintf(`[(,][%v]?(\w+)[%v]?`, sqliteSeparator, sqliteSeparator))
+        // columnRegexp splits one column definition into name, type and modifiers.
+        columnRegexp = regexp.MustCompile(fmt.Sprintf(`^[%v]?([\w\d]+)[%v]?\s+([\w\(\)\d]+)(.*)$`, sqliteSeparator, sqliteSeparator))
+        // defaultValueRegexp captures a DEFAULT literal; the lookahead stops at a
+        // space, COLLATE/GENERATED keywords or end-of-string so later modifiers
+        // are not swallowed into the value.
+        defaultValueRegexp = regexp.MustCompile(`(?i) DEFAULT \(?(.+)?\)?( |COLLATE|GENERATED|$)`)
+        // regRealDataType extracts the first size suffix, e.g. the 8 in varchar(8).
+        regRealDataType = regexp.MustCompile(`[^\d](\d+)[^\d]?`)
+)
+
+// getAllColumns extracts the column names from a parenthesized list such as
+// "(`a`,`b`)" or "(a, b)".
+func getAllColumns(s string) []string <span class="cov8" title="1">{
+        allMatches := columnsRegexp.FindAllStringSubmatch(s, -1)
+        columns := make([]string, 0, len(allMatches))
+        for _, matches := range allMatches </span><span class="cov8" title="1">{
+                if len(matches) &gt; 1 </span><span class="cov8" title="1">{
+                        columns = append(columns, matches[1])
+                }</span>
+        }
+        <span class="cov8" title="1">return columns</span>
+}
+
+// ddl is a parsed CREATE TABLE statement. head is the "CREATE TABLE &lt;name&gt;"
+// prefix, fields the raw column/table-constraint definitions between the
+// outer parentheses, and columns the per-column metadata parsed out of
+// fields (populated only for genuine column definitions).
+type ddl struct {
+        head    string
+        fields  []string
+        columns []migrator.ColumnType
+}
+
+// parseDDL parses one or more SQL statements. The first CREATE TABLE wins:
+// its head, fields and columns are extracted. CREATE INDEX statements are
+// tolerated (and ignored) because the migrator queries table and index DDL
+// together. Anything else is invalid.
+//
+// Body splitting is quote- and bracket-aware: commas inside string literals
+// or nested parentheses (e.g. CHECK (x IN ('a,b'))) do not split fields, and
+// doubled quotes inside literals are treated as escapes.
+func parseDDL(strs ...string) (*ddl, error) <span class="cov8" title="1">{
+        var result ddl
+        for _, str := range strs </span><span class="cov8" title="1">{
+                if sections := tableRegexp.FindStringSubmatch(str); len(sections) &gt; 0 </span><span class="cov8" title="1">{
+                        var (
+                                ddlBody      = sections[2]
+                                ddlBodyRunes = []rune(ddlBody)
+                                bracketLevel int
+                                quote        rune
+                                buf          string
+                        )
+                        ddlBodyRunesLen := len(ddlBodyRunes)
+
+                        result.head = sections[1]
+
+                        for idx := 0; idx &lt; ddlBodyRunesLen; idx++ </span><span class="cov8" title="1">{
+                                var (
+                                        next rune = 0
+                                        c         = ddlBodyRunes[idx]
+                                )
+                                if idx+1 &lt; ddlBodyRunesLen </span><span class="cov8" title="1">{
+                                        next = ddlBodyRunes[idx+1]
+                                }</span>
+
+                                <span class="cov8" title="1">if sc := string(c); separatorRegexp.MatchString(sc) </span><span class="cov8" title="1">{
+                                        if c == next </span><span class="cov8" title="1">{
+                                                buf += sc // Skip escaped quote
+                                                idx++
+                                        }</span> else<span class="cov8" title="1"> if quote &gt; 0 </span><span class="cov8" title="1">{
+                                                quote = 0
+                                        }</span> else<span class="cov8" title="1"> {
+                                                quote = c
+                                        }</span>
+                                } else<span class="cov8" title="1"> if quote == 0 </span><span class="cov8" title="1">{
+                                        if c == '(' </span><span class="cov8" title="1">{
+                                                bracketLevel++
+                                        }</span> else<span class="cov8" title="1"> if c == ')' </span><span class="cov8" title="1">{
+                                                bracketLevel--
+                                        }</span> else<span class="cov8" title="1"> if bracketLevel == 0 </span><span class="cov8" title="1">{
+                                                if c == ',' </span><span class="cov8" title="1">{
+                                                        result.fields = append(result.fields, strings.TrimSpace(buf))
+                                                        buf = ""
+                                                        continue</span>
+                                                }
+                                        }
+                                }
+
+                                <span class="cov8" title="1">if bracketLevel &lt; 0 </span><span class="cov8" title="1">{
+                                        return nil, errors.New("invalid DDL, unbalanced brackets")
+                                }</span>
+
+                                <span class="cov8" title="1">buf += string(c)</span>
+                        }
+
+                        <span class="cov8" title="1">if bracketLevel != 0 </span><span class="cov8" title="1">{
+                                return nil, errors.New("invalid DDL, unbalanced brackets")
+                        }</span>
+
+                        <span class="cov8" title="1">if buf != "" </span><span class="cov8" title="1">{
+                                result.fields = append(result.fields, strings.TrimSpace(buf))
+                        }</span>
+
+                        // Classify each field: table constraints (CHECK /
+                        // CONSTRAINT ... UNIQUE / PRIMARY KEY (...)) carry
+                        // per-column metadata onto existing columns; anything
+                        // else is a column definition of its own.
+                        <span class="cov8" title="1">for _, f := range result.fields </span><span class="cov8" title="1">{
+                                fUpper := strings.ToUpper(f)
+                                if strings.HasPrefix(fUpper, "CHECK") </span><span class="cov0" title="0">{
+                                        continue</span>
+                                }
+                                <span class="cov8" title="1">if strings.HasPrefix(fUpper, "CONSTRAINT") </span><span class="cov8" title="1">{
+                                        matches := uniqueRegexp.FindStringSubmatch(f)
+                                        if len(matches) &gt; 0 </span><span class="cov8" title="1">{
+                                                if columns := getAllColumns(matches[1]); len(columns) == 1 </span><span class="cov8" title="1">{
+                                                        for idx, column := range result.columns </span><span class="cov8" title="1">{
+                                                                if column.NameValue.String == columns[0] </span><span class="cov8" title="1">{
+                                                                        column.UniqueValue = sql.NullBool{Bool: true, Valid: true}
+                                                                        result.columns[idx] = column
+                                                                        break</span>
+                                                                }
+                                                        }
+                                                }
+                                        }
+                                        <span class="cov8" title="1">continue</span>
+                                }
+                                <span class="cov8" title="1">if strings.HasPrefix(fUpper, "PRIMARY KEY") </span><span class="cov8" title="1">{
+                                        for _, name := range getAllColumns(f) </span><span class="cov8" title="1">{
+                                                for idx, column := range result.columns </span><span class="cov8" title="1">{
+                                                        if column.NameValue.String == name </span><span class="cov8" title="1">{
+                                                                column.PrimaryKeyValue = sql.NullBool{Bool: true, Valid: true}
+                                                                result.columns[idx] = column
+                                                                break</span>
+                                                        }
+                                                }
+                                        }
+                                } else<span class="cov8" title="1"> if matches := columnRegexp.FindStringSubmatch(f); len(matches) &gt; 0 </span><span class="cov8" title="1">{
+                                        columnType := migrator.ColumnType{
+                                                NameValue:         sql.NullString{String: matches[1], Valid: true},
+                                                DataTypeValue:     sql.NullString{String: matches[2], Valid: true},
+                                                ColumnTypeValue:   sql.NullString{String: matches[2], Valid: true},
+                                                PrimaryKeyValue:   sql.NullBool{Valid: true},
+                                                UniqueValue:       sql.NullBool{Valid: true},
+                                                NullableValue:     sql.NullBool{Bool: true, Valid: true},
+                                                DefaultValueValue: sql.NullString{Valid: false},
+                                        }
+
+                                        matchUpper := strings.ToUpper(matches[3])
+                                        if strings.Contains(matchUpper, " NOT NULL") </span><span class="cov8" title="1">{
+                                                columnType.NullableValue = sql.NullBool{Bool: false, Valid: true}
+                                        }</span> else<span class="cov8" title="1"> if strings.Contains(matchUpper, " NULL") </span><span class="cov8" title="1">{
+                                                columnType.NullableValue = sql.NullBool{Bool: true, Valid: true}
+                                        }</span>
+                                        <span class="cov8" title="1">if strings.Contains(matchUpper, " UNIQUE") </span><span class="cov8" title="1">{
+                                                columnType.UniqueValue = sql.NullBool{Bool: true, Valid: true}
+                                        }</span>
+                                        <span class="cov8" title="1">if strings.Contains(matchUpper, " PRIMARY") </span><span class="cov8" title="1">{
+                                                columnType.PrimaryKeyValue = sql.NullBool{Bool: true, Valid: true}
+                                        }</span>
+                                        <span class="cov8" title="1">if defaultMatches := defaultValueRegexp.FindStringSubmatch(matches[3]); len(defaultMatches) &gt; 1 </span><span class="cov8" title="1">{
+                                                if strings.ToLower(defaultMatches[1]) != "null" </span><span class="cov8" title="1">{
+                                                        columnType.DefaultValueValue = sql.NullString{String: strings.Trim(defaultMatches[1], `"`), Valid: true}
+                                                }</span>
+                                        }
+
+                                        // Split a size suffix off the declared type, e.g.
+                                        // "varchar(100)" -&gt; type "varchar", length 100.
+                                        <span class="cov8" title="1">matches := regRealDataType.FindAllStringSubmatch(columnType.DataTypeValue.String, -1)
+                                        if len(matches) == 1 &amp;&amp; len(matches[0]) == 2 </span><span class="cov8" title="1">{
+                                                size, _ := strconv.Atoi(matches[0][1])
+                                                columnType.LengthValue = sql.NullInt64{Valid: true, Int64: int64(size)}
+                                                columnType.DataTypeValue.String = strings.TrimSuffix(columnType.DataTypeValue.String, matches[0][0])
+                                        }</span>
+
+                                        <span class="cov8" title="1">result.columns = append(result.columns, columnType)</span>
+                                }
+                        }
+                } else<span class="cov8" title="1"> if matches := indexRegexp.FindStringSubmatch(str); len(matches) &gt; 0 </span>{<span class="cov8" title="1">
+                        // CREATE INDEX: intentionally ignored, it carries no column
+                        // metadata beyond what the table DDL already provided.
+                }</span> else<span class="cov8" title="1"> {
+                        return nil, errors.New("invalid DDL")
+                }</span>
+        }
+
+        <span class="cov8" title="1">return &amp;result, nil</span>
+}
+
+// clone returns a deep-enough copy (slices copied, values are value types).
+func (d *ddl) clone() *ddl <span class="cov8" title="1">{
+        copied := new(ddl)
+        *copied = *d
+
+        copied.fields = make([]string, len(d.fields))
+        copy(copied.fields, d.fields)
+        copied.columns = make([]migrator.ColumnType, len(d.columns))
+        copy(copied.columns, d.columns)
+
+        return copied
+}</span>
+
+// compile renders the statement back to SQL: head plus parenthesized fields.
+func (d *ddl) compile() string <span class="cov8" title="1">{
+        if len(d.fields) == 0 </span><span class="cov8" title="1">{
+                return d.head
+        }</span>
+        <span class="cov8" title="1">return fmt.Sprintf("%s (%s)", d.head, strings.Join(d.fields, ","))</span>
+}
+
+// renameTable rewrites the table name inside head. src may appear quoted or
+// unquoted; it is replaced with the back-quoted dst.
+func (d *ddl) renameTable(dst, src string) error <span class="cov8" title="1">{
+        tableReg, err := regexp.Compile("\\s*('|`|\")?\\b" + regexp.QuoteMeta(src) + "\\b('|`|\")?\\s*")
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov8" title="1">replaced := tableReg.ReplaceAllString(d.head, fmt.Sprintf(" `%s` ", dst))
+        if replaced == d.head </span><span class="cov8" title="1">{
+                return fmt.Errorf("failed to look up tablename `%s` from DDL head '%s'", src, d.head)
+        }</span>
+
+        <span class="cov8" title="1">d.head = replaced
+        return nil</span>
+}
+
+// addConstraint replaces the definition of an existing constraint with the
+// same name, or appends it when absent.
+func (d *ddl) addConstraint(name string, sql string) <span class="cov8" title="1">{
+        reg := regexp.MustCompile("^CONSTRAINT [\"`]?" + regexp.QuoteMeta(name) + "[\"` ]")
+
+        for i := 0; i &lt; len(d.fields); i++ </span><span class="cov8" title="1">{
+                if reg.MatchString(d.fields[i]) </span><span class="cov8" title="1">{
+                        d.fields[i] = sql
+                        return
+                }</span>
+        }
+        <span class="cov8" title="1">d.fields = append(d.fields, sql)</span>
+}
+
+// removeConstraint deletes a named constraint, reporting whether it existed.
+func (d *ddl) removeConstraint(name string) bool <span class="cov8" title="1">{
+        reg := regexp.MustCompile("^CONSTRAINT [\"`]?" + regexp.QuoteMeta(name) + "[\"` ]")
+
+        for i := 0; i &lt; len(d.fields); i++ </span><span class="cov8" title="1">{
+                if reg.MatchString(d.fields[i]) </span><span class="cov8" title="1">{
+                        d.fields = append(d.fields[:i], d.fields[i+1:]...)
+                        return true
+                }</span>
+        }
+        <span class="cov8" title="1">return false</span>
+}
+
+// hasConstraint reports whether a named constraint is present.
+func (d *ddl) hasConstraint(name string) bool <span class="cov8" title="1">{
+        reg := regexp.MustCompile("^CONSTRAINT [\"`]?" + regexp.QuoteMeta(name) + "[\"` ]")
+
+        for _, f := range d.fields </span><span class="cov8" title="1">{
+                if reg.MatchString(f) </span><span class="cov8" title="1">{
+                        return true
+                }</span>
+        }
+        <span class="cov8" title="1">return false</span>
+}
+
+// getColumns returns the back-quoted names of every real column definition,
+// skipping table constraints and generated columns: those must not appear in
+// the INSERT ... SELECT used by table recreation.
+func (d *ddl) getColumns() []string <span class="cov8" title="1">{
+        res := []string{}
+
+        for _, f := range d.fields </span><span class="cov8" title="1">{
+                fUpper := strings.ToUpper(f)
+                if strings.HasPrefix(fUpper, "PRIMARY KEY") ||
+                        strings.HasPrefix(fUpper, "CHECK") ||
+                        strings.HasPrefix(fUpper, "CONSTRAINT") ||
+                        strings.Contains(fUpper, "GENERATED ALWAYS AS") </span><span class="cov8" title="1">{
+                        continue</span>
+                }
+
+                <span class="cov8" title="1">reg := regexp.MustCompile("^[\"`']?([\\w\\d]+)[\"`']?")
+                match := reg.FindStringSubmatch(f)
+                if match != nil </span><span class="cov8" title="1">{
+                        res = append(res, "`"+match[1]+"`")
+                }</span>
+        }
+        <span class="cov8" title="1">return res</span>
+}
+
+// removeColumn deletes the named column definition, reporting whether the
+// column was found.
+func (d *ddl) removeColumn(name string) bool <span class="cov8" title="1">{
+        reg := regexp.MustCompile("^(`|'|\"| )" + regexp.QuoteMeta(name) + "(`|'|\"| ) .*?$")
+
+        for i := 0; i &lt; len(d.fields); i++ </span><span class="cov8" title="1">{
+                if reg.MatchString(d.fields[i]) </span><span class="cov8" title="1">{
+                        d.fields = append(d.fields[:i], d.fields[i+1:]...)
+                        return true
+                }</span>
+        }
+        <span class="cov8" title="1">return false</span>
+}
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">package sqlite
+
+import (
+        "database/sql"
+        "fmt"
+        "strings"
+
+        "gorm.io/gorm"
+        "gorm.io/gorm/clause"
+        "gorm.io/gorm/migrator"
+        "gorm.io/gorm/schema"
+)
+
+// Migrator implements gorm.Migrator for SQLite.
+//
+// SQLite can ALTER only a small subset of table shapes: RENAME and ADD
+// COLUMN work directly, but changing a column's type, dropping a column or
+// editing constraints requires the classic 12-step copy recipe
+// (https://www.sqlite.org/lang_altertable.html#otheralter). This migrator
+// implements that recipe once in recreateTable and routes every structural
+// change through it.
+type Migrator struct {
+        migrator.Migrator
+}
+
+// RunWithoutForeignKey executes fc with foreign-key enforcement turned off,
+// restoring the previous setting afterwards. Needed because DROP/RENAME
+// inside table recreation would otherwise trip deferred references.
+func (m Migrator) RunWithoutForeignKey(fc func() error) error <span class="cov8" title="1">{
+        var enabled int
+        m.DB.Raw("PRAGMA foreign_keys").Scan(&amp;enabled)
+        if enabled == 1 </span><span class="cov8" title="1">{
+                m.DB.Exec("PRAGMA foreign_keys = OFF")
+                defer m.DB.Exec("PRAGMA foreign_keys = ON")
+        }</span>
+        <span class="cov8" title="1">return fc()</span>
+}
+
+// HasTable reports whether a table named after value exists in sqlite_master.
+func (m Migrator) HasTable(value interface{}) bool <span class="cov8" title="1">{
+        var count int
+        m.Migrator.RunWithValue(value, func(stmt *gorm.Statement) error </span><span class="cov8" title="1">{
+                return m.DB.Raw(
+                        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?", stmt.Table,
+                ).Row().Scan(&amp;count)
+        }</span>)
+        <span class="cov8" title="1">return count &gt; 0</span>
+}
+
+// DropTable drops the given tables in reverse dependency order, with
+// foreign keys disabled for the duration.
+func (m Migrator) DropTable(values ...interface{}) error <span class="cov8" title="1">{
+        return m.RunWithoutForeignKey(func() error </span><span class="cov8" title="1">{
+                values = m.ReorderModels(values, false)
+                tx := m.DB.Session(&amp;gorm.Session{})
+                for i := len(values) - 1; i &gt;= 0; i-- </span><span class="cov8" title="1">{
+                        if err := m.RunWithValue(values[i], func(stmt *gorm.Statement) error </span><span class="cov8" title="1">{
+                                return tx.Exec("DROP TABLE IF EXISTS ?", clause.Table{Name: stmt.Table}).Error
+                        }</span>); err != nil <span class="cov0" title="0">{
+                                return err
+                        }</span>
+                }
+                <span class="cov8" title="1">return nil</span>
+        })
+}
+
+// GetTables lists every user table in the current database.
+func (m Migrator) GetTables() (tableList []string, err error) <span class="cov8" title="1">{
+        return tableList, m.DB.Raw("SELECT name FROM sqlite_master where type=?", "table").Scan(&amp;tableList).Error
+}</span>
+
+// HasColumn reports whether the named column appears in the table's DDL.
+// Column names cannot be queried from a catalog, so the CREATE TABLE text
+// stored in sqlite_master is pattern-matched with the field's quoting
+// variants (plain, `"`, “ ` “, `[`, tab-separated).
+func (m Migrator) HasColumn(value interface{}, name string) bool <span class="cov8" title="1">{
+        var count int
+        m.Migrator.RunWithValue(value, func(stmt *gorm.Statement) error </span><span class="cov8" title="1">{
+                if stmt.Schema != nil </span><span class="cov8" title="1">{
+                        if field := stmt.Schema.LookUpField(name); field != nil </span><span class="cov8" title="1">{
+                                name = field.DBName
+                        }</span>
+                }
+                <span class="cov8" title="1">if name != "" </span><span class="cov8" title="1">{
+                        m.DB.Raw(
+                                "SELECT count(*) FROM sqlite_master WHERE type = ? AND tbl_name = ? AND (sql LIKE ? OR sql LIKE ? OR sql LIKE ? OR sql LIKE ? OR sql LIKE ?)",
+                                "table", stmt.Table,
+                                `%"`+name+`" %`, `%`+name+` %`, "%`"+name+"`%", "%["+name+"]%", "%\t"+name+"\t%",
+                        ).Row().Scan(&amp;count)
+                }</span>
+                <span class="cov8" title="1">return nil</span>
+        })
+        <span class="cov8" title="1">return count &gt; 0</span>
+}
+
+// AlterColumn changes a column's definition. SQLite cannot do this in place,
+// so the table is recreated and the column definition is substituted from
+// the current schema. A UNIQUE constraint on the old definition is rebuilt
+// too, because the regenerated column type omits it.
+func (m Migrator) AlterColumn(value interface{}, name string) error <span class="cov8" title="1">{
+        return m.RunWithoutForeignKey(func() error </span><span class="cov8" title="1">{
+                return m.recreateTable(value, nil, func(ddl *ddl, stmt *gorm.Statement) (*ddl, []interface{}, error) </span><span class="cov8" title="1">{
+                        if field := stmt.Schema.LookUpField(name); field != nil </span><span class="cov8" title="1">{
+                                var sqlArgs []interface{}
+                                for i, f := range ddl.fields </span><span class="cov8" title="1">{
+                                        if matches := columnRegexp.FindStringSubmatch(f); len(matches) &gt; 1 &amp;&amp; matches[1] == field.DBName </span><span class="cov8" title="1">{
+                                                ddl.fields[i] = fmt.Sprintf("`%v` ?", field.DBName)
+                                                sqlArgs = []interface{}{m.FullDataTypeOf(field)}
+                                                // Tables created by older versions store the
+                                                // UNIQUE flag inline in the column definition;
+                                                // FullDataTypeOf does not carry it, so rebuild
+                                                // the standalone constraint.
+                                                if strings.Contains(strings.ToUpper(matches[3]), " UNIQUE") </span><span class="cov8" title="1">{
+                                                        uniName := m.DB.NamingStrategy.UniqueName(stmt.Table, field.DBName)
+                                                        uni, _ := m.GuessConstraintInterfaceAndTable(stmt, uniName)
+                                                        if uni != nil </span><span class="cov8" title="1">{
+                                                                uniSQL, uniArgs := uni.Build()
+                                                                ddl.addConstraint(uniName, uniSQL)
+                                                                sqlArgs = append(sqlArgs, uniArgs...)
+                                                        }</span>
+                                                }
+                                                <span class="cov8" title="1">break</span>
+                                        }
+                                }
+                                <span class="cov8" title="1">return ddl, sqlArgs, nil</span>
+                        }
+                        <span class="cov8" title="1">return nil, nil, fmt.Errorf("failed to alter field with name %v", name)</span>
+                })
+        })
+}
+
+// ColumnTypes describes the table's columns by combining the DDL stored in
+// sqlite_master (declared types, defaults, constraints) with the runtime
+// column metadata of a sampled row.
+func (m Migrator) ColumnTypes(value interface{}) ([]gorm.ColumnType, error) <span class="cov8" title="1">{
+        columnTypes := make([]gorm.ColumnType, 0)
+        execErr := m.RunWithValue(value, func(stmt *gorm.Statement) (err error) </span><span class="cov8" title="1">{
+                var (
+                        sqls   []string
+                        sqlDDL *ddl
+                )
+                if err := m.DB.Raw(
+                        "SELECT sql FROM sqlite_master WHERE type IN ? AND tbl_name = ? AND sql IS NOT NULL order by type = ? desc",
+                        []string{"table", "index"}, stmt.Table, "table",
+                ).Scan(&amp;sqls).Error; err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+                <span class="cov8" title="1">if sqlDDL, err = parseDDL(sqls...); err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+
+                <span class="cov8" title="1">rows, err := m.DB.Session(&amp;gorm.Session{}).Table(stmt.Table).Limit(1).Rows()
+                if err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+                <span class="cov8" title="1">defer func() </span><span class="cov8" title="1">{
+                        err = rows.Close()
+                }</span>()
+
+                <span class="cov8" title="1">rawColumnTypes, err := rows.ColumnTypes()
+                if err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+
+                <span class="cov8" title="1">for _, c := range rawColumnTypes </span><span class="cov8" title="1">{
+                        columnType := migrator.ColumnType{SQLColumnType: c}
+                        for _, column := range sqlDDL.columns </span><span class="cov8" title="1">{
+                                if column.NameValue.String == c.Name() </span><span class="cov8" title="1">{
+                                        column.SQLColumnType = c
+                                        columnType = column
+                                        break</span>
+                                }
+                        }
+                        <span class="cov8" title="1">columnTypes = append(columnTypes, columnType)</span>
+                }
+                <span class="cov8" title="1">return err</span>
+        })
+        <span class="cov8" title="1">return columnTypes, execErr</span>
+}
+
+// DropColumn removes a column from the table definition. SQLite &gt;= 3.35 has
+// native DROP COLUMN, but it refuses several shapes (indexed or referenced
+// columns), so the recreate path is used uniformly.
+func (m Migrator) DropColumn(value interface{}, name string) error <span class="cov8" title="1">{
+        return m.recreateTable(value, nil, func(ddl *ddl, stmt *gorm.Statement) (*ddl, []interface{}, error) </span><span class="cov8" title="1">{
+                if field := stmt.Schema.LookUpField(name); field != nil </span><span class="cov0" title="0">{
+                        name = field.DBName
+                }</span>
+                <span class="cov8" title="1">ddl.removeColumn(name)
+                return ddl, nil, nil</span>
+        })
+}
+
+// CreateConstraint (re)adds a named table constraint.
+func (m Migrator) CreateConstraint(value interface{}, name string) error <span class="cov8" title="1">{
+        return m.RunWithValue(value, func(stmt *gorm.Statement) error </span><span class="cov8" title="1">{
+                constraint, table := m.GuessConstraintInterfaceAndTable(stmt, name)
+                return m.recreateTable(value, &amp;table, func(ddl *ddl, stmt *gorm.Statement) (*ddl, []interface{}, error) </span><span class="cov8" title="1">{
+                        if constraint == nil </span><span class="cov8" title="1">{
+                                return nil, nil, nil
+                        }</span>
+                        <span class="cov8" title="1">constraintSQL, constraintValues := constraint.Build()
+                        ddl.addConstraint(constraint.GetName(), constraintSQL)
+                        return ddl, constraintValues, nil</span>
+                })
+        })
+}
+
+// DropConstraint removes a named table constraint.
+func (m Migrator) DropConstraint(value interface{}, name string) error <span class="cov8" title="1">{
+        return m.RunWithValue(value, func(stmt *gorm.Statement) error </span><span class="cov8" title="1">{
+                constraint, table := m.GuessConstraintInterfaceAndTable(stmt, name)
+                if constraint != nil </span><span class="cov0" title="0">{
+                        name = constraint.GetName()
+                }</span>
+                <span class="cov8" title="1">return m.recreateTable(value, &amp;table, func(ddl *ddl, stmt *gorm.Statement) (*ddl, []interface{}, error) </span><span class="cov8" title="1">{
+                        ddl.removeConstraint(name)
+                        return ddl, nil, nil
+                }</span>)
+        })
+}
+
+// HasConstraint reports whether a CONSTRAINT declaration with the given name
+// appears in the table's DDL.
+func (m Migrator) HasConstraint(value interface{}, name string) bool <span class="cov8" title="1">{
+        var count int64
+        m.RunWithValue(value, func(stmt *gorm.Statement) error </span><span class="cov8" title="1">{
+                constraint, table := m.GuessConstraintInterfaceAndTable(stmt, name)
+                if constraint != nil </span><span class="cov8" title="1">{
+                        name = constraint.GetName()
+                }</span>
+                <span class="cov8" title="1">m.DB.Raw(
+                        "SELECT count(*) FROM sqlite_master WHERE type = ? AND tbl_name = ? AND (sql LIKE ? OR sql LIKE ? OR sql LIKE ? OR sql LIKE ? OR sql LIKE ?)",
+                        "table", table,
+                        `%CONSTRAINT "`+name+`" %`, `%CONSTRAINT `+name+` %`,
+                        "%CONSTRAINT `"+name+"`%", "%CONSTRAINT ["+name+"]%", "%CONSTRAINT \t"+name+"\t%",
+                ).Row().Scan(&amp;count)
+                return nil</span>
+        })
+        <span class="cov8" title="1">return count &gt; 0</span>
+}
+
+// CurrentDatabase returns the name of the current database. In SQLite the
+// main (default) database is always named "main", per PRAGMA database_list.
+func (m Migrator) CurrentDatabase() (name string) <span class="cov8" title="1">{
+        var null interface{}
+        m.DB.Raw("PRAGMA database_list").Row().Scan(&amp;null, &amp;name, &amp;null)
+        return
+}</span>
+
+// BuildIndexOptions renders index field options (expressions, collations,
+// sort directions) as bindable fragments.
+func (m Migrator) BuildIndexOptions(opts []schema.IndexOption, stmt *gorm.Statement) (results []interface{}) <span class="cov8" title="1">{
+        for _, opt := range opts </span><span class="cov8" title="1">{
+                str := stmt.Quote(opt.DBName)
+                if opt.Expression != "" </span><span class="cov8" title="1">{
+                        str = opt.Expression
+                }</span>
+                <span class="cov8" title="1">if opt.Collate != "" </span><span class="cov8" title="1">{
+                        str += " COLLATE " + opt.Collate
+                }</span>
+                <span class="cov8" title="1">if opt.Sort != "" </span><span class="cov8" title="1">{
+                        str += " " + opt.Sort
+                }</span>
+                <span class="cov8" title="1">results = append(results, clause.Expr{SQL: str})</span>
+        }
+        <span class="cov8" title="1">return</span>
+}
+
+// CreateIndex issues CREATE INDEX for a schema-declared index.
+func (m Migrator) CreateIndex(value interface{}, name string) error <span class="cov8" title="1">{
+        return m.RunWithValue(value, func(stmt *gorm.Statement) error </span><span class="cov8" title="1">{
+                if stmt.Schema != nil </span><span class="cov8" title="1">{
+                        if idx := stmt.Schema.LookIndex(name); idx != nil </span><span class="cov8" title="1">{
+                                opts := m.BuildIndexOptions(idx.Fields, stmt)
+                                values := []interface{}{clause.Column{Name: idx.Name}, clause.Table{Name: stmt.Table}, opts}
+
+                                createIndexSQL := "CREATE "
+                                if idx.Class != "" </span><span class="cov8" title="1">{
+                                        createIndexSQL += idx.Class + " "
+                                }</span>
+                                <span class="cov8" title="1">createIndexSQL += "INDEX ?"
+                                if idx.Type != "" </span><span class="cov0" title="0">{
+                                        createIndexSQL += " USING " + idx.Type
+                                }</span>
+                                <span class="cov8" title="1">createIndexSQL += " ON ??"
+                                if idx.Where != "" </span><span class="cov0" title="0">{
+                                        createIndexSQL += " WHERE " + idx.Where
+                                }</span>
+                                <span class="cov8" title="1">return m.DB.Exec(createIndexSQL, values...).Error</span>
+                        }
+                }
+                <span class="cov8" title="1">return fmt.Errorf("failed to create index with name %v", name)</span>
+        })
+}
+
+// HasIndex reports whether the given index exists on the table.
+func (m Migrator) HasIndex(value interface{}, name string) bool <span class="cov8" title="1">{
+        var count int
+        m.RunWithValue(value, func(stmt *gorm.Statement) error </span><span class="cov8" title="1">{
+                if stmt.Schema != nil </span><span class="cov8" title="1">{
+                        if idx := stmt.Schema.LookIndex(name); idx != nil </span><span class="cov8" title="1">{
+                                name = idx.Name
+                        }</span>
+                }
+                <span class="cov8" title="1">if name != "" </span><span class="cov8" title="1">{
+                        m.DB.Raw(
+                                "SELECT count(*) FROM sqlite_master WHERE type = ? AND tbl_name = ? AND name = ?",
+                                "index", stmt.Table, name,
+                        ).Row().Scan(&amp;count)
+                }</span>
+                <span class="cov8" title="1">return nil</span>
+        })
+        <span class="cov8" title="1">return count &gt; 0</span>
+}
+
+// RenameIndex renames an index by dropping it and recreating it under the
+// new name with the original SQL (SQLite has no ALTER INDEX).
+func (m Migrator) RenameIndex(value interface{}, oldName, newName string) error <span class="cov8" title="1">{
+        return m.RunWithValue(value, func(stmt *gorm.Statement) error </span><span class="cov8" title="1">{
+                var sql string
+                m.DB.Raw(
+                        "SELECT sql FROM sqlite_master WHERE type = ? AND tbl_name = ? AND name = ?",
+                        "index", stmt.Table, oldName,
+                ).Row().Scan(&amp;sql)
+                if sql != "" </span><span class="cov8" title="1">{
+                        if err := m.DropIndex(value, oldName); err != nil </span><span class="cov0" title="0">{
+                                return err
+                        }</span>
+                        <span class="cov8" title="1">return m.DB.Exec(strings.Replace(sql, oldName, newName, 1)).Error</span>
+                }
+                <span class="cov8" title="1">return fmt.Errorf("failed to find index with name %v", oldName)</span>
+        })
+}
+
+// DropIndex drops an index by name.
+func (m Migrator) DropIndex(value interface{}, name string) error <span class="cov8" title="1">{
+        return m.RunWithValue(value, func(stmt *gorm.Statement) error </span><span class="cov8" title="1">{
+                if stmt.Schema != nil </span><span class="cov8" title="1">{
+                        if idx := stmt.Schema.LookIndex(name); idx != nil </span><span class="cov8" title="1">{
+                                name = idx.Name
+                        }</span>
+                }
+                <span class="cov8" title="1">return m.DB.Exec("DROP INDEX ?", clause.Column{Name: name}).Error</span>
+        })
+}
+
+// Index mirrors one row of PRAGMA index_list.
+type Index struct {
+        Seq     int
+        Name    string
+        Unique  bool
+        Origin  string
+        Partial bool
+}
+
+// GetIndexes lists the table's indexes from PRAGMA index_list, fetching each
+// index's columns from PRAGMA index_info. Indexes with origin "u" (backing a
+// UNIQUE column constraint) are skipped — they are constraints, not indexes
+// the schema declared.
+//
+// See https://www.sqlite.org/pragma.html#pragma_index_list
+func (m Migrator) GetIndexes(value interface{}) ([]gorm.Index, error) <span class="cov8" title="1">{
+        indexes := make([]gorm.Index, 0)
+        err := m.RunWithValue(value, func(stmt *gorm.Statement) error </span><span class="cov8" title="1">{
+                rst := make([]*Index, 0)
+                if err := m.DB.Debug().Raw("SELECT * FROM PRAGMA_index_list(?)", stmt.Table).Scan(&amp;rst).Error; err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+                <span class="cov8" title="1">for _, index := range rst </span><span class="cov8" title="1">{
+                        if index.Origin == "u" </span><span class="cov8" title="1">{
+                                continue</span>
+                        }
+                        <span class="cov8" title="1">var columns []string
+                        if err := m.DB.Raw("SELECT name FROM PRAGMA_index_info(?)", index.Name).Scan(&amp;columns).Error; err != nil </span><span class="cov0" title="0">{
+                                return err
+                        }</span>
+                        <span class="cov8" title="1">indexes = append(indexes, &amp;migrator.Index{
+                                TableName:       stmt.Table,
+                                NameValue:       index.Name,
+                                ColumnList:      columns,
+                                PrimaryKeyValue: sql.NullBool{Bool: index.Origin == "pk", Valid: true},
+                                UniqueValue:     sql.NullBool{Bool: index.Unique, Valid: true},
+                        })</span>
+                }
+                <span class="cov8" title="1">return nil</span>
+        })
+        <span class="cov8" title="1">return indexes, err</span>
+}
+
+// getRawDDL fetches the CREATE TABLE statement sqlite_master stores for the
+// given table.
+func (m Migrator) getRawDDL(table string) (string, error) <span class="cov8" title="1">{
+        var createSQL string
+        m.DB.Raw(
+                "SELECT sql FROM sqlite_master WHERE type = ? AND tbl_name = ? AND name = ?",
+                "table", table, table,
+        ).Row().Scan(&amp;createSQL)
+        if m.DB.Error != nil </span><span class="cov0" title="0">{
+                return "", m.DB.Error
+        }</span>
+        <span class="cov8" title="1">return createSQL, nil</span>
+}
+
+// recreateTable rewrites a table's DDL and copies its data across, the
+// canonical way to alter column definitions or constraints in SQLite:
+//
+//  1. read the original CREATE TABLE from sqlite_master;
+//  2. let getCreateSQL mutate a parsed copy of it;
+//  3. create the result under a temporary name, with any bind arguments;
+//  4. INSERT INTO temp SELECT * FROM original (matching column lists only);
+//  5. DROP the original and RENAME the temp table into place.
+//
+// All of steps 3-5 run inside one transaction.
+func (m Migrator) recreateTable(
+        value interface{}, tablePtr *string,
+        getCreateSQL func(ddl *ddl, stmt *gorm.Statement) (*ddl, []interface{}, error),
+) error <span class="cov8" title="1">{
+        return m.RunWithValue(value, func(stmt *gorm.Statement) error </span><span class="cov8" title="1">{
+                table := stmt.Table
+                if tablePtr != nil </span><span class="cov8" title="1">{
+                        table = *tablePtr
+                }</span>
+
+                <span class="cov8" title="1">rawDDL, err := m.getRawDDL(table)
+                if err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+                <span class="cov8" title="1">originDDL, err := parseDDL(rawDDL)
+                if err != nil </span><span class="cov8" title="1">{
+                        return err
+                }</span>
+
+                <span class="cov8" title="1">createDDL, sqlArgs, err := getCreateSQL(originDDL.clone(), stmt)
+                if err != nil </span><span class="cov8" title="1">{
+                        return err
+                }</span>
+                <span class="cov8" title="1">if createDDL == nil </span><span class="cov8" title="1">{
+                        return nil
+                }</span>
+
+                <span class="cov8" title="1">newTableName := table + "__temp"
+                if err := createDDL.renameTable(newTableName, table); err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+
+                <span class="cov8" title="1">columns := createDDL.getColumns()
+                createSQL := createDDL.compile()
+
+                return m.DB.Transaction(func(tx *gorm.DB) error </span><span class="cov8" title="1">{
+                        if err := tx.Exec(createSQL, sqlArgs...).Error; err != nil </span><span class="cov0" title="0">{
+                                return err
+                        }</span>
+                        <span class="cov8" title="1">queries := []string{
+                                fmt.Sprintf("INSERT INTO `%v`(%v) SELECT %v FROM `%v`",
+                                        newTableName, strings.Join(columns, ","), strings.Join(columns, ","), table),
+                                fmt.Sprintf("DROP TABLE `%v`", table),
+                                fmt.Sprintf("ALTER TABLE `%v` RENAME TO `%v`", newTableName, table),
+                        }
+                        for _, query := range queries </span><span class="cov8" title="1">{
+                                if err := tx.Exec(query).Error; err != nil </span><span class="cov0" title="0">{
+                                        return err
+                                }</span>
+                        }
+                        <span class="cov8" title="1">return nil</span>
+                })
+        })
+}
+</pre>
+		
+		<pre class="file" id="file2" style="display: none">// Package sqlite is a GORM dialector that drives SQLite entirely in pure Go
+// (no CGO, no native SQLite library required).
+//
+// It is a clean-room rebuild of the driver layer that glebarez/sqlite
+// pioneered, restructured so that it depends directly on modernc.org/sqlite
+// — the canonical pure-Go SQLite implementation — instead of an intermediate
+// fork. That package registers itself as a database/sql driver named "sqlite"
+// on import, and this package implements gorm.Dialector, the savepoint
+// dialect extension and the error-translation extension on top of it.
+//
+// Basic usage:
+//
+//        import (
+//            "gorm.io/gorm"
+//            sqlite "github.com/hicode0101/go-sqlite"
+//        )
+//
+//        db, err := gorm.Open(sqlite.Open(":memory:"), &amp;gorm.Config{})
+package sqlite
+
+import (
+        "context"
+        "database/sql"
+        "strconv"
+
+        "gorm.io/gorm"
+        "gorm.io/gorm/callbacks"
+        "gorm.io/gorm/clause"
+        "gorm.io/gorm/logger"
+        "gorm.io/gorm/migrator"
+        "gorm.io/gorm/schema"
+
+        gosqlite "modernc.org/sqlite"
+        // gosqlite registers itself with database/sql under the name "sqlite"
+        // in its init function; the import above also provides *sqlite.Error,
+        // the concrete error type this dialector translates.
+        sqlite3 "modernc.org/sqlite/lib"
+)
+
+// DriverName is the name modernc.org/sqlite registers its database/sql
+// driver under. It is exported so callers can customize Dialector.DriverName
+// when they registered a separate driver instance themselves (for example
+// sql.Register("app", &amp;gosqlite.Driver{})).
+const DriverName = "sqlite"
+
+// minReturningVersion is the first SQLite version supporting the RETURNING
+// clause (https://www.sqlite.org/releaselog/3_35_0.html). Modernc builds ship
+// far newer cores, but the check keeps the dialector correct even when the
+// caller swaps in a custom connection pool backed by an older engine.
+const minReturningVersion = "3.35.0"
+
+// Dialector implements the GORM dialect for pure-Go SQLite.
+//
+// The zero value is not usable directly; build one with Open (a DSN) or by
+// filling the struct with either a DSN or a ready-made connection pool.
+type Dialector struct {
+        // DriverName selects the database/sql driver to open DSN with.
+        // Empty means DriverName ("sqlite", the modernc registration).
+        DriverName string
+        // DSN is the data source name passed to sql.Open. Examples:
+        //   ":memory:", "app.db", "file:app.db?_pragma=foreign_keys(1)"
+        DSN string
+        // Conn, when set, replaces sql.Open entirely: the given pool becomes
+        // the gorm.DB ConnPool and DSN is ignored.
+        Conn gorm.ConnPool
+}
+
+// Open returns a Dialector for the given DSN. DSN syntax is whatever the
+// underlying modernc.org/sqlite driver accepts; PRAGMAs can be preset via
+// the _pragma query parameter, e.g.
+//
+//        sqlite.Open("file:app.db?_pragma=journal_mode(WAL)&amp;_pragma=busy_timeout(5000)")
+func Open(dsn string) gorm.Dialector <span class="cov8" title="1">{
+        return &amp;Dialector{DSN: dsn}
+}</span>
+
+// OpenWithConn returns a Dialector backed by an existing connection pool,
+// bypassing sql.Open. Use it when the caller manages connection setup —
+// sql.OpenDB with a custom connector, instrumentation wrappers, etc.
+func OpenWithConn(conn gorm.ConnPool) gorm.Dialector <span class="cov8" title="1">{
+        return &amp;Dialector{Conn: conn}
+}</span>
+
+// Name implements gorm.Dialector.
+func (Dialector) Name() string <span class="cov8" title="1">{
+        return "sqlite"
+}</span>
+
+// Initialize implements gorm.Dialector. It wires the connection pool into
+// db, registers GORM's default callbacks (with RETURNING clauses when the
+// engine supports them) and installs the dialect-specific clause builders.
+func (dialector Dialector) Initialize(db *gorm.DB) (err error) <span class="cov8" title="1">{
+        if dialector.DriverName == "" </span><span class="cov8" title="1">{
+                dialector.DriverName = DriverName
+        }</span>
+
+        <span class="cov8" title="1">if dialector.Conn != nil </span><span class="cov8" title="1">{
+                db.ConnPool = dialector.Conn
+        }</span> else<span class="cov8" title="1"> {
+                conn, err := sql.Open(dialector.DriverName, dialector.DSN)
+                if err != nil </span><span class="cov8" title="1">{
+                        return err
+                }</span>
+                <span class="cov8" title="1">db.ConnPool = conn</span>
+        }
+
+        // Probe the engine version once; modernc.org/sqlite answers with the
+        // bundled SQLite core version (e.g. "3.50.4").
+        <span class="cov8" title="1">var version string
+        if err := db.ConnPool.QueryRowContext(context.Background(), "select sqlite_version()").Scan(&amp;version); err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov8" title="1">config := &amp;callbacks.Config{
+                // SQLite's last_insert_rowid() reports the rowid of the most
+                // recent insert, i.e. the LAST row of a batch insert; GORM must
+                // therefore walk the destination backwards when backfilling IDs.
+                LastInsertIDReversed: true,
+        }
+        if compareVersion(version, minReturningVersion) &gt;= 0 </span><span class="cov8" title="1">{
+                // RETURNING lets CREATE/UPDATE/DELETE stream back the affected
+                // rows, which avoids the batch-ID arithmetic above entirely.
+                config.CreateClauses = []string{"INSERT", "VALUES", "ON CONFLICT", "RETURNING"}
+                config.UpdateClauses = []string{"UPDATE", "SET", "FROM", "WHERE", "RETURNING"}
+                config.DeleteClauses = []string{"DELETE", "FROM", "WHERE", "RETURNING"}
+        }</span>
+        <span class="cov8" title="1">callbacks.RegisterDefaultCallbacks(db, config)
+
+        for k, v := range dialector.ClauseBuilders() </span><span class="cov8" title="1">{
+                db.ClauseBuilders[k] = v
+        }</span>
+        <span class="cov8" title="1">return nil</span>
+}
+
+// ClauseBuilders implements gorm.Dialector. It adjusts three clauses whose
+// generic rendering does not fit SQLite.
+func (Dialector) ClauseBuilders() map[string]clause.ClauseBuilder <span class="cov8" title="1">{
+        return map[string]clause.ClauseBuilder{
+                // SQLite writes modifiers (e.g. "OR IGNORE") before INTO and has
+                // no INSERT alias syntax, so the INSERT clause is rendered here
+                // rather than by the generic builder.
+                "INSERT": func(c clause.Clause, builder clause.Builder) </span><span class="cov8" title="1">{
+                        if insert, ok := c.Expression.(clause.Insert); ok </span><span class="cov8" title="1">{
+                                if stmt, ok := builder.(*gorm.Statement); ok </span><span class="cov8" title="1">{
+                                        stmt.WriteString("INSERT ")
+                                        if insert.Modifier != "" </span><span class="cov8" title="1">{
+                                                stmt.WriteString(insert.Modifier)
+                                                stmt.WriteByte(' ')
+                                        }</span>
+                                        <span class="cov8" title="1">stmt.WriteString("INTO ")
+                                        if insert.Table.Name == "" </span><span class="cov8" title="1">{
+                                                stmt.WriteQuoted(stmt.Table)
+                                        }</span> else<span class="cov0" title="0"> {
+                                                stmt.WriteQuoted(insert.Table)
+                                        }</span>
+                                        <span class="cov8" title="1">return</span>
+                                }
+                        }
+                        <span class="cov8" title="1">c.Build(builder)</span>
+                },
+                // SQLite has LIMIT but no standalone OFFSET keyword: both parts of
+                // a LIMIT clause are emitted together, and LIMIT must still appear
+                // (as -1) when only an offset is requested.
+                "LIMIT": func(c clause.Clause, builder clause.Builder) <span class="cov8" title="1">{
+                        if limit, ok := c.Expression.(clause.Limit); ok </span><span class="cov8" title="1">{
+                                lmt := -1
+                                if limit.Limit != nil &amp;&amp; *limit.Limit &gt;= 0 </span><span class="cov8" title="1">{
+                                        lmt = *limit.Limit
+                                }</span>
+                                <span class="cov8" title="1">if lmt &gt;= 0 || limit.Offset &gt; 0 </span><span class="cov8" title="1">{
+                                        builder.WriteString("LIMIT ")
+                                        builder.WriteString(strconv.Itoa(lmt))
+                                }</span>
+                                <span class="cov8" title="1">if limit.Offset &gt; 0 </span><span class="cov8" title="1">{
+                                        builder.WriteString(" OFFSET ")
+                                        builder.WriteString(strconv.Itoa(limit.Offset))
+                                }</span>
+                        }
+                },
+                // SQLite has no row-level locking (SELECT ... FOR UPDATE); the
+                // clause is silently dropped instead of producing a syntax error.
+                "FOR": func(c clause.Clause, builder clause.Builder) <span class="cov8" title="1">{
+                        if _, ok := c.Expression.(clause.Locking); ok </span><span class="cov8" title="1">{
+                                return
+                        }</span>
+                        <span class="cov8" title="1">c.Build(builder)</span>
+                },
+        }
+}
+
+// DefaultValueOf implements gorm.Dialector. Auto-increment columns fall back
+// to NULL so SQLite assigns the next rowid; other columns render DEFAULT.
+func (Dialector) DefaultValueOf(field *schema.Field) clause.Expression <span class="cov8" title="1">{
+        if field.AutoIncrement </span><span class="cov8" title="1">{
+                return clause.Expr{SQL: "NULL"}
+        }</span>
+        <span class="cov8" title="1">return clause.Expr{SQL: "DEFAULT"}</span>
+}
+
+// Migrator implements gorm.Dialector.
+func (dialector Dialector) Migrator(db *gorm.DB) gorm.Migrator <span class="cov8" title="1">{
+        return Migrator{migrator.Migrator{Config: migrator.Config{
+                DB:                          db,
+                Dialector:                   dialector,
+                CreateIndexAfterCreateTable: true,
+        }}}
+}</span>
+
+// BindVarTo implements gorm.Dialector. SQLite takes positional '?' holders.
+func (Dialector) BindVarTo(writer clause.Writer, stmt *gorm.Statement, v interface{}) <span class="cov8" title="1">{
+        writer.WriteByte('?')
+}</span>
+
+// QuoteTo implements gorm.Dialector. Identifiers are quoted with backticks;
+// embedded backticks are doubled and dotted paths are quoted per segment so
+// "users.id" becomes `users`.`id`. Segments that already arrive fully quoted
+// (leading backtick) are passed through with escaping preserved.
+func (Dialector) QuoteTo(writer clause.Writer, str string) <span class="cov8" title="1">{
+        var (
+                underQuoted, selfQuoted bool
+                continuousBacktick      int8
+                shiftDelimiter          int8
+        )
+
+        for _, v := range []byte(str) </span><span class="cov8" title="1">{
+                switch v </span>{
+                case '`':<span class="cov8" title="1">
+                        continuousBacktick++
+                        if continuousBacktick == 2 </span><span class="cov8" title="1">{
+                                writer.WriteString("``")
+                                continuousBacktick = 0
+                        }</span>
+                case '.':<span class="cov8" title="1">
+                        if continuousBacktick &gt; 0 || !selfQuoted </span><span class="cov8" title="1">{
+                                shiftDelimiter = 0
+                                underQuoted = false
+                                continuousBacktick = 0
+                                writer.WriteString("`")
+                        }</span>
+                        <span class="cov8" title="1">writer.WriteByte(v)
+                        continue</span>
+                default:<span class="cov8" title="1">
+                        if shiftDelimiter-continuousBacktick &lt;= 0 &amp;&amp; !underQuoted </span><span class="cov8" title="1">{
+                                writer.WriteString("`")
+                                underQuoted = true
+                                if selfQuoted = continuousBacktick &gt; 0; selfQuoted </span><span class="cov8" title="1">{
+                                        continuousBacktick -= 1
+                                }</span>
+                        }
+
+                        <span class="cov8" title="1">for ; continuousBacktick &gt; 0; continuousBacktick -= 1 </span><span class="cov8" title="1">{
+                                writer.WriteString("``")
+                        }</span>
+
+                        <span class="cov8" title="1">writer.WriteByte(v)</span>
+                }
+                <span class="cov8" title="1">shiftDelimiter++</span>
+        }
+
+        <span class="cov8" title="1">if continuousBacktick &gt; 0 &amp;&amp; !selfQuoted </span><span class="cov0" title="0">{
+                writer.WriteString("``")
+        }</span>
+        <span class="cov8" title="1">writer.WriteString("`")</span>
+}
+
+// Explain implements gorm.Dialector. Values are rendered double-quoted.
+func (Dialector) Explain(sql string, vars ...interface{}) string <span class="cov8" title="1">{
+        return logger.ExplainSQL(sql, nil, `"`, vars...)
+}</span>
+
+// DataTypeOf implements gorm.Dialector, mapping GORM's abstract types onto
+// SQLite's flexible storage classes.
+func (Dialector) DataTypeOf(field *schema.Field) string <span class="cov8" title="1">{
+        switch field.DataType </span>{
+        case schema.Bool:<span class="cov8" title="1">
+                return "numeric"</span>
+        case schema.Int, schema.Uint:<span class="cov8" title="1">
+                if field.AutoIncrement </span><span class="cov8" title="1">{
+                        // PRIMARY KEY AUTOINCREMENT on INTEGER creates the implicit
+                        // rowid alias with a strict monotonic guarantee:
+                        // https://www.sqlite.org/autoinc.html
+                        return "integer PRIMARY KEY AUTOINCREMENT"
+                }</span>
+                <span class="cov8" title="1">return "integer"</span>
+        case schema.Float:<span class="cov8" title="1">
+                return "real"</span>
+        case schema.String:<span class="cov8" title="1">
+                return "text"</span>
+        case schema.Time:<span class="cov8" title="1">
+                if val, ok := field.TagSettings["TYPE"]; ok </span><span class="cov8" title="1">{
+                        return val
+                }</span>
+                <span class="cov8" title="1">return "datetime"</span>
+        case schema.Bytes:<span class="cov8" title="1">
+                return "blob"</span>
+        }
+        <span class="cov8" title="1">return string(field.DataType)</span>
+}
+
+// SavePoint implements gorm.SavePointerDialectorInterface.
+func (Dialector) SavePoint(tx *gorm.DB, name string) error <span class="cov8" title="1">{
+        tx.Exec("SAVEPOINT " + name)
+        return nil
+}</span>
+
+// RollbackTo implements gorm.SavePointerDialectorInterface.
+func (Dialector) RollbackTo(tx *gorm.DB, name string) error <span class="cov8" title="1">{
+        tx.Exec("ROLLBACK TO SAVEPOINT " + name)
+        return nil
+}</span>
+
+// Translate implements gorm.ErrorTranslator, mapping driver errors onto the
+// GORM sentinels so applications can use errors.Is without parsing messages.
+func (Dialector) Translate(err error) error <span class="cov8" title="1">{
+        if terr, ok := err.(*gosqlite.Error); ok </span><span class="cov8" title="1">{
+                switch terr.Code() </span>{
+                case sqlite3.SQLITE_CONSTRAINT_UNIQUE,
+                        sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY:<span class="cov8" title="1">
+                        return gorm.ErrDuplicatedKey</span>
+                case sqlite3.SQLITE_CONSTRAINT_FOREIGNKEY:<span class="cov8" title="1">
+                        return gorm.ErrForeignKeyViolated</span>
+                }
+        }
+        <span class="cov8" title="1">return err</span>
+}
+
+// compareVersion compares dotted version strings numerically: -1, 0 or 1 as
+// version1 &lt;, == or &gt; version2. Shorter strings compare as if padded with 0.
+func compareVersion(version1, version2 string) int <span class="cov8" title="1">{
+        n, m := len(version1), len(version2)
+        i, j := 0, 0
+        for i &lt; n || j &lt; m </span><span class="cov8" title="1">{
+                x := 0
+                for ; i &lt; n &amp;&amp; version1[i] != '.'; i++ </span><span class="cov8" title="1">{
+                        x = x*10 + int(version1[i]-'0')
+                }</span>
+                <span class="cov8" title="1">i++
+                y := 0
+                for ; j &lt; m &amp;&amp; version2[j] != '.'; j++ </span><span class="cov8" title="1">{
+                        y = y*10 + int(version2[j]-'0')
+                }</span>
+                <span class="cov8" title="1">j++
+                if x &gt; y </span><span class="cov8" title="1">{
+                        return 1
+                }</span>
+                <span class="cov8" title="1">if x &lt; y </span><span class="cov8" title="1">{
+                        return -1
+                }</span>
+        }
+        <span class="cov8" title="1">return 0</span>
+}
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>

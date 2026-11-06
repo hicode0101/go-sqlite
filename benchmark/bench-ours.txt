@@ -1,0 +1,62 @@
+DRIVER: hicode0101/go-sqlite (modernc.org/sqlite v1.61.1)
+goos: windows
+goarch: amd64
+pkg: github.com/hicode0101/go-sqlite/benchmark
+cpu: 12th Gen Intel(R) Core(TM) i7-12700H
+BenchmarkInsert-20            	   44569	     32111 ns/op	    5969 B/op	      84 allocs/op
+BenchmarkInsert-20            	   42892	     28148 ns/op	    5967 B/op	      84 allocs/op
+BenchmarkInsert-20            	   42852	     27894 ns/op	    5967 B/op	      84 allocs/op
+BenchmarkInsert-20            	   32905	     34089 ns/op	    5966 B/op	      84 allocs/op
+BenchmarkInsert-20            	   34444	     36619 ns/op	    5967 B/op	      84 allocs/op
+BenchmarkInsertBatch100-20    	    2493	    548693 ns/op	   67897 B/op	    1373 allocs/op
+BenchmarkInsertBatch100-20    	    2438	    505240 ns/op	   67903 B/op	    1372 allocs/op
+BenchmarkInsertBatch100-20    	    2379	    490406 ns/op	   67873 B/op	    1372 allocs/op
+BenchmarkInsertBatch100-20    	    2589	    504062 ns/op	   67882 B/op	    1373 allocs/op
+BenchmarkInsertBatch100-20    	    2508	    590836 ns/op	   67947 B/op	    1373 allocs/op
+BenchmarkTxInsert100-20       	     326	   3587727 ns/op	  540733 B/op	    7045 allocs/op
+BenchmarkTxInsert100-20       	     333	   3296309 ns/op	  540673 B/op	    7046 allocs/op
+BenchmarkTxInsert100-20       	     391	   3125327 ns/op	  540766 B/op	    7057 allocs/op
+BenchmarkTxInsert100-20       	     388	   3455318 ns/op	  540798 B/op	    7057 allocs/op
+BenchmarkTxInsert100-20       	     348	   3443416 ns/op	  540788 B/op	    7049 allocs/op
+BenchmarkUpdate-20            	   45662	     25484 ns/op	    5977 B/op	      64 allocs/op
+BenchmarkUpdate-20            	   51578	     24118 ns/op	    5977 B/op	      64 allocs/op
+BenchmarkUpdate-20            	   50446	     24339 ns/op	    5977 B/op	      64 allocs/op
+BenchmarkUpdate-20            	   48903	     23456 ns/op	    5977 B/op	      64 allocs/op
+BenchmarkUpdate-20            	   51786	     23164 ns/op	    5977 B/op	      64 allocs/op
+BenchmarkSelectByPK-20        	   64970	     16735 ns/op	    4191 B/op	      74 allocs/op
+BenchmarkSelectByPK-20        	   70341	     16520 ns/op	    4191 B/op	      74 allocs/op
+BenchmarkSelectByPK-20        	   72750	     16054 ns/op	    4190 B/op	      74 allocs/op
+BenchmarkSelectByPK-20        	   78150	     15615 ns/op	    4191 B/op	      74 allocs/op
+BenchmarkSelectByPK-20        	   79117	     15455 ns/op	    4191 B/op	      74 allocs/op
+BenchmarkSelect100-20         	    6924	    179444 ns/op	   44140 B/op	    1337 allocs/op
+BenchmarkSelect100-20         	    6877	    167190 ns/op	   44137 B/op	    1337 allocs/op
+BenchmarkSelect100-20         	    7124	    169719 ns/op	   44155 B/op	    1338 allocs/op
+BenchmarkSelect100-20         	    7304	    166340 ns/op	   44135 B/op	    1336 allocs/op
+BenchmarkSelect100-20         	    6782	    173186 ns/op	   44133 B/op	    1336 allocs/op
+BenchmarkRawInsert-20         	  225248	      5345 ns/op	     368 B/op	      13 allocs/op
+BenchmarkRawInsert-20         	  254511	      5116 ns/op	     368 B/op	      13 allocs/op
+BenchmarkRawInsert-20         	  246552	      5047 ns/op	     368 B/op	      13 allocs/op
+BenchmarkRawInsert-20         	  242222	      4807 ns/op	     368 B/op	      13 allocs/op
+BenchmarkRawInsert-20         	  271166	      4656 ns/op	     368 B/op	      13 allocs/op
+BenchmarkRawSelectByPK-20     	  396502	      2970 ns/op	     857 B/op	      30 allocs/op
+BenchmarkRawSelectByPK-20     	  399186	      2924 ns/op	     857 B/op	      30 allocs/op
+BenchmarkRawSelectByPK-20     	  427857	      2985 ns/op	     857 B/op	      30 allocs/op
+BenchmarkRawSelectByPK-20     	  414412	      2944 ns/op	     857 B/op	      30 allocs/op
+BenchmarkRawSelectByPK-20     	  413823	      2922 ns/op	     857 B/op	      30 allocs/op
+BenchmarkParallelReads-20     	   61002	     25099 ns/op	    4842 B/op	      88 allocs/op
+BenchmarkParallelReads-20     	   44494	     29189 ns/op	    4857 B/op	      88 allocs/op
+BenchmarkParallelReads-20     	   45310	     28730 ns/op	    4852 B/op	      88 allocs/op
+BenchmarkParallelReads-20     	   48571	     28526 ns/op	    4854 B/op	      88 allocs/op
+BenchmarkParallelReads-20     	   45313	     27567 ns/op	    4846 B/op	      88 allocs/op
+BenchmarkParallelWrites-20    	     178	   8842948 ns/op	    9448 B/op	     152 allocs/op
+BenchmarkParallelWrites-20    	     100	  10668532 ns/op	    9747 B/op	     156 allocs/op
+BenchmarkParallelWrites-20    	     100	  12645928 ns/op	   10009 B/op	     164 allocs/op
+BenchmarkParallelWrites-20    	     100	  17687086 ns/op	   10462 B/op	     174 allocs/op
+BenchmarkParallelWrites-20    	     171	   9729700 ns/op	    9225 B/op	     149 allocs/op
+BenchmarkParallelMixed-20     	     345	   3065055 ns/op	    6507 B/op	     112 allocs/op
+BenchmarkParallelMixed-20     	     860	   1248768 ns/op	    6216 B/op	     109 allocs/op
+BenchmarkParallelMixed-20     	    1185	   1172640 ns/op	    6052 B/op	     106 allocs/op
+BenchmarkParallelMixed-20     	     882	   1323891 ns/op	    6115 B/op	     107 allocs/op
+BenchmarkParallelMixed-20     	     682	   2006296 ns/op	    6207 B/op	     108 allocs/op
+PASS
+ok  	github.com/hicode0101/go-sqlite/benchmark	88.060s

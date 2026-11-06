@@ -1,0 +1,52 @@
+goos: windows
+goarch: amd64
+pkg: github.com/hicode0101/go-sqlite/benchmark
+cpu: 12th Gen Intel(R) Core(TM) i7-12700H
+                  │ bench-ours.txt │          bench-glebarez.txt          │
+                  │     sec/op     │    sec/op     vs base                │
+Insert-20             32.11µ ± ∞ ¹   27.03µ ± ∞ ¹         ~ (p=0.056 n=5)
+InsertBatch100-20     505.2µ ± ∞ ¹   524.1µ ± ∞ ¹         ~ (p=1.000 n=5)
+TxInsert100-20        3.443m ± ∞ ¹   3.158m ± ∞ ¹         ~ (p=0.222 n=5)
+Update-20             24.12µ ± ∞ ¹   22.06µ ± ∞ ¹    -8.52% (p=0.008 n=5)
+SelectByPK-20         16.05µ ± ∞ ¹   14.48µ ± ∞ ¹    -9.82% (p=0.008 n=5)
+Select100-20          169.7µ ± ∞ ¹   181.0µ ± ∞ ¹    +6.64% (p=0.016 n=5)
+RawInsert-20          5.047µ ± ∞ ¹   7.600µ ± ∞ ¹   +50.58% (p=0.008 n=5)
+RawSelectByPK-20      2.944µ ± ∞ ¹   7.626µ ± ∞ ¹  +159.04% (p=0.008 n=5)
+ParallelReads-20      28.53µ ± ∞ ¹   24.93µ ± ∞ ¹   -12.62% (p=0.032 n=5)
+ParallelWrites-20     10.67m ± ∞ ¹   12.70m ± ∞ ¹         ~ (p=0.690 n=5)
+ParallelMixed-20      1.324m ± ∞ ¹   1.553m ± ∞ ¹         ~ (p=0.548 n=5)
+geomean               107.4µ         119.9µ         +11.63%
+¹ need >= 6 samples for confidence interval at level 0.95
+
+                  │ bench-ours.txt │          bench-glebarez.txt          │
+                  │      B/op      │     B/op       vs base               │
+Insert-20            5.827Ki ± ∞ ¹   5.716Ki ± ∞ ¹   -1.91% (p=0.008 n=5)
+InsertBatch100-20    66.31Ki ± ∞ ¹   62.13Ki ± ∞ ¹   -6.29% (p=0.008 n=5)
+TxInsert100-20       528.1Ki ± ∞ ¹   522.0Ki ± ∞ ¹   -1.15% (p=0.008 n=5)
+Update-20            5.837Ki ± ∞ ¹   5.766Ki ± ∞ ¹   -1.22% (p=0.008 n=5)
+SelectByPK-20        4.093Ki ± ∞ ¹   3.888Ki ± ∞ ¹   -5.01% (p=0.008 n=5)
+Select100-20         43.10Ki ± ∞ ¹   43.67Ki ± ∞ ¹   +1.33% (p=0.008 n=5)
+RawInsert-20           368.0 ± ∞ ¹     344.0 ± ∞ ¹   -6.52% (p=0.008 n=5)
+RawSelectByPK-20       857.0 ± ∞ ¹     665.0 ± ∞ ¹  -22.40% (p=0.008 n=5)
+ParallelReads-20     4.738Ki ± ∞ ¹   4.527Ki ± ∞ ¹   -4.45% (p=0.008 n=5)
+ParallelWrites-20    9.519Ki ± ∞ ¹   9.573Ki ± ∞ ¹        ~ (p=1.000 n=5)
+ParallelMixed-20     6.062Ki ± ∞ ¹   5.806Ki ± ∞ ¹   -4.22% (p=0.008 n=5)
+geomean              8.525Ki         8.109Ki         -4.88%
+¹ need >= 6 samples for confidence interval at level 0.95
+
+                  │ bench-ours.txt │          bench-glebarez.txt           │
+                  │   allocs/op    │  allocs/op    vs base                 │
+Insert-20              84.00 ± ∞ ¹    79.00 ± ∞ ¹   -5.95% (p=0.008 n=5)
+InsertBatch100-20     1.373k ± ∞ ¹   1.367k ± ∞ ¹   -0.44% (p=0.008 n=5)
+TxInsert100-20        7.049k ± ∞ ¹   6.813k ± ∞ ¹   -3.35% (p=0.008 n=5)
+Update-20              64.00 ± ∞ ¹    62.00 ± ∞ ¹   -3.12% (p=0.008 n=5)
+SelectByPK-20          74.00 ± ∞ ¹    68.00 ± ∞ ¹   -8.11% (p=0.008 n=5)
+Select100-20          1.337k ± ∞ ¹   1.529k ± ∞ ¹  +14.36% (p=0.008 n=5)
+RawInsert-20           13.00 ± ∞ ¹    13.00 ± ∞ ¹        ~ (p=1.000 n=5) ²
+RawSelectByPK-20       30.00 ± ∞ ¹    25.00 ± ∞ ¹  -16.67% (p=0.008 n=5)
+ParallelReads-20       88.00 ± ∞ ¹    82.00 ± ∞ ¹   -6.82% (p=0.008 n=5)
+ParallelWrites-20      156.0 ± ∞ ¹    158.0 ± ∞ ¹        ~ (p=0.889 n=5)
+ParallelMixed-20       108.0 ± ∞ ¹    102.0 ± ∞ ¹   -5.56% (p=0.008 n=5)
+geomean                167.8          162.1         -3.39%
+¹ need >= 6 samples for confidence interval at level 0.95
+² all samples are equal
