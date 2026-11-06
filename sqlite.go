@@ -1,7 +1,6 @@
 // Package sqlite is a GORM dialector that drives SQLite entirely in pure Go
 // (no CGO, no native SQLite library required).
 //
-// It is a clean-room rebuild of the driver layer that glebarez/sqlite
 // pioneered, restructured so that it depends directly on modernc.org/sqlite
 // — the canonical pure-Go SQLite implementation — instead of an intermediate
 // fork. That package registers itself as a database/sql driver named "sqlite"
